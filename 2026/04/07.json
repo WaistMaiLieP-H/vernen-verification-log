@@ -1,10 +1,10 @@
 {
   "date": "2026-04-07",
-  "merkle_root": "3d5fe1cd52caa010061689289d4dd42607090610cedade1a2bb41df18ac6ddbe",
-  "record_count": 7892,
+  "merkle_root": "77b6504fefa9a0972979ce8055ea97c9eff1774d18f24ad4de166d7db7362af4",
+  "record_count": 8049,
   "first_seq": 1,
-  "last_seq": 7892,
-  "computed_at": "2026-04-07T06:10:51.797Z",
+  "last_seq": 8049,
+  "computed_at": "2026-04-07T06:35:04.705Z",
   "previous_root": null,
   "verification_url": "https://compliance.vernenlegal.com/api/verify/merkle/2026-04-07"
 }
