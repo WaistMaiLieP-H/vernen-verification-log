@@ -4,84 +4,107 @@ This repository is the **public, append-only verification log** for the
 [Vernen Legal Compliance](https://compliance.vernenlegal.com) platform.
 
 Every day at 01:00 UTC, the platform computes a **Merkle root** over every
-verifiable record produced that day (skill executions, document intakes,
-audit findings, case filings) and commits the root to this repository as a
-single small JSON file.
+verifiable record produced that day (skill executions, compliance reports,
+audit findings) and commits the root to this repository as a single small
+JSON file.
 
 Once the commit lands, the root exists in every clone of this repo. Git's
 own append-only hash chain protects it from silent rewriting. If the platform
 ever tried to retroactively change a record, anyone with an earlier clone
 can prove the divergence.
 
-## Structure
+## What This Is
+
+A federated verification protocol — like Certificate Transparency, but for
+AI agent activity and compliance records. The math:
+
+1. Every Citizen action is hashed and chained to the previous action
+2. Daily, all that day's hashes are folded into a Merkle tree
+3. The root of that tree is committed here, publicly
+4. Anyone can request a Merkle proof for a single record from the platform API
+5. Anyone can reconstruct the root from the proof — proving the record existed
+6. No trust in Vernen required. The math is the proof.
+
+## Repository Structure
 
 ```
 vernen-verification-log/
-├── README.md           ← this file
-├── genesis.json        ← genesis hash + protocol version
-├── verify.html         ← browser-based verifier (pure JS, no backend)
-└── YYYY/
-    └── MM/
-        └── DD.json     ← one Merkle root per day
+├── README.md              ← this file
+├── LICENSE                ← MIT
+├── genesis.json           ← protocol constants and genesis hash
+├── verify.html            ← browser-based verifier (pure JavaScript)
+├── verify.py              ← standalone Python verifier (no dependencies)
+├── protocol/              ← the open-source protocol implementation
+│   ├── SPEC.md                          ← full architecture specification
+│   ├── PROOF_DEMO.md                    ← end-to-end verification proof
+│   ├── verification-engine.ts           ← core hash chain + Merkle engine
+│   ├── verification-anchor.ts           ← GitHub anchoring service
+│   └── migration-030-verification.sql   ← D1 schema (Cloudflare/SQLite)
+└── 2026/
+    └── 04/
+        └── 07.json        ← daily Merkle root
 ```
 
-## A daily file
+## How to Verify a Record
 
-```json
-{
-  "date": "2026-04-07",
-  "merkle_root": "c7a7026e...",
-  "record_count": 156,
-  "first_seq": 1,
-  "last_seq": 156,
-  "computed_at": "2026-04-07T05:15:46Z",
-  "previous_root": "...",
-  "verification_url": "https://compliance.vernenlegal.com/api/verify/merkle/2026-04-07"
-}
+**Option 1 — Browser** (no install):
+1. Open `verify.html` in any modern browser
+2. Get a record's proof from `https://compliance.vernenlegal.com/api/verify/proof/<id>`
+3. Paste the leaf hash, leaf index, proof path, and the public root from this repo
+4. Click verify
+
+**Option 2 — Python** (no dependencies):
+```bash
+python verify.py <record_id>
 ```
 
-## How to verify a record
+**Option 3 — Run your own Vernen instance**:
+The protocol is open. Anyone can deploy the verification engine on Cloudflare
+Workers + D1 (or adapt it to any append-only datastore) and publish their own
+daily Merkle roots to their own GitHub repo. Cross-instance verification is
+trivial — every instance follows the same protocol.
 
-You will need four things from the platform:
+## What This Proves
 
-1. The record's `record_id`
-2. The record's `content_hash`
-3. The Merkle proof path (`GET /api/verify/proof/:recordId`)
-4. The leaf index from the same response
+If a record passes verification:
+- It existed at the date claimed by the daily root
+- The platform has not modified it since
+- The cryptographic chain from genesis to that record is unbroken
 
-Then:
+If verification fails:
+- Either the record never existed, or
+- It has been modified, or
+- The proof is malformed
 
-1. Open `verify.html` in any browser. It runs entirely in your browser —
-   no backend, no network calls to Vernen, no trust required.
-2. Paste your record details and the expected Merkle root from this repo.
-3. The verifier recomputes the Merkle root from the proof and compares it
-   to the root committed here. If they match, the record is **verified**.
-   If they differ, the record (or the proof, or the root) has been
-   **tampered with**.
-
-## Why GitHub instead of a blockchain?
-
-- **Cost:** $0 per record vs $0.01–$50 of gas.
-- **Speed:** Verification is an HTTP GET, not an RPC call.
-- **Privacy:** Only hashes leave the platform. Document contents stay in D1.
-- **Court acceptance:** Append-only public logs are a well-established
-  evidentiary primitive (Certificate Transparency, RFC 3161).
-- **Distributed by default:** Anyone can `git clone` this repo and have
-  their own audit-grade copy of the entire chain.
-
-## Genesis
-
-See `genesis.json`. The genesis hash is
-`1662b214b39d68462c60e10dedd67634b85c8db250eabf41c252e968cb05b149`,
-the SHA-256 of the seed string `VERNEN_GENESIS_2026`. It is the
-`prev_hash` of the first record in the platform's hash chain.
-
-## Specification
-
-The full architecture is documented in
-[VERIFIABILITY_ARCHITECTURE.md](https://github.com/WaistMaiLieP-H/VERNEN/blob/master/docs/VERIFIABILITY_ARCHITECTURE.md).
+The verification works **without any cooperation from Vernen**. The math runs
+in your browser or your terminal. The public root in this repo is anchored by
+Git's distributed history.
 
 ## License
 
-This log is published under [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
-The hashes are facts. Facts cannot be owned.
+- This repository's data files (daily roots, README, genesis.json): **CC0-1.0**
+- Protocol implementation in `protocol/` (TypeScript engine, Python verifier): **MIT**
+- `verify.html`: **MIT**
+
+You can use, fork, modify, and run this protocol for any purpose.
+
+## Why This Matters
+
+The Vernen platform generates compliance audits, court filings, and AI agent
+activity logs that are intended to be legally accountable. Without cryptographic
+verification, those records depend on trust — trust in Vernen's database, trust
+in Vernen's hosting provider, trust that no one has rewritten history.
+
+This protocol replaces that trust with **math anchored in public infrastructure**.
+The same model used by Certificate Transparency to authenticate every SSL
+certificate on the internet. The same Merkle tree structure used by Bitcoin.
+The same Git hash chain used by every open-source project on Earth.
+
+Anyone can verify. No one can silently rewrite. That's the standard worth
+becoming.
+
+---
+
+**Platform:** https://compliance.vernenlegal.com
+**Spec:** [`protocol/SPEC.md`](protocol/SPEC.md)
+**Demo:** [`protocol/PROOF_DEMO.md`](protocol/PROOF_DEMO.md)
