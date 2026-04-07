@@ -221,7 +221,8 @@ export class LiabilityMapping {
     const accountabilityVacuums = this.detectAccountabilityVacuums(
       entities,
       edges,
-      entityMap
+      entityMap,
+      syntheticDivisions
     );
 
     // ─── Cluster analysis ────────────────────────────────────────────
@@ -654,7 +655,8 @@ export class LiabilityMapping {
   private detectAccountabilityVacuums(
     entities: EntityRecord[],
     edges: SharedAttributeEdge[],
-    entityMap: Map<string, EntityRecord>
+    entityMap: Map<string, EntityRecord>,
+    syntheticDivisions: SyntheticDivisionCluster[] = []
   ): AccountabilityVacuum[] {
     const vacuums: AccountabilityVacuum[] = [];
 
@@ -719,6 +721,46 @@ export class LiabilityMapping {
           rationale: `Worker entity ${worker.name} interacts with ${distinctIds.size} 'independent' parties (${pillars.map((id) => entityMap.get(id)?.name ?? id).join(", ")}), but ${links.length} attribute link(s) connect those parties to each other — collapsing the apparent independence.`,
           severity,
         });
+      }
+    }
+
+    // ─── Structural fall-through path ────────────────────────────────
+    // When the per-worker flow data isn't available (common with narrative
+    // documents that don't explicitly enumerate receivesRevenueFrom /
+    // paysLiabilityTo / ownsEquipmentUsedBy), we can still detect the
+    // accountability vacuum pattern from the synthetic-division clusters
+    // alone. The pattern is: 3+ entities sharing 2+ attribute kinds AND
+    // collectively spanning the operational role spread (worker_entity,
+    // lessor, insurer, operating_company). When that pattern is present,
+    // the integrated enterprise IS the accountability vacuum — the
+    // operational pillars are distributed across linked shells.
+    if (vacuums.length === 0) {
+      const operationalRoles: EntityRole[] = [
+        "worker_entity",
+        "lessor",
+        "insurer",
+        "operating_company",
+        "fleet_owner",
+        "lessee",
+      ];
+      for (const cluster of syntheticDivisions) {
+        if (cluster.entityIds.length < 3) continue;
+        const rolesInCluster = new Set(cluster.combinedRoles);
+        const operationalRolesPresent = operationalRoles.filter((r) => rolesInCluster.has(r));
+        if (operationalRolesPresent.length >= 2) {
+          const clusterEdges = edges.filter(
+            (e) => cluster.entityIds.includes(e.fromEntityId) && cluster.entityIds.includes(e.toEntityId)
+          );
+          vacuums.push({
+            operationalUnit: `Integrated enterprise across ${cluster.entityIds.length} attribute-linked entities`,
+            workerEntityId: cluster.entityIds.find((id) => entityMap.get(id)?.roles?.includes("worker_entity")),
+            equipmentOwnerEntityId: cluster.entityIds.find((id) => entityMap.get(id)?.roles?.includes("lessor")),
+            insurerEntityId: cluster.entityIds.find((id) => entityMap.get(id)?.roles?.includes("insurer")),
+            attributeLinks: clusterEdges,
+            rationale: `${cluster.entityIds.length} attribute-linked entities (${cluster.entityIds.map((id) => entityMap.get(id)?.name ?? id).join(", ")}) collectively span operational roles ${operationalRolesPresent.join(", ")}. The synthetic-division cluster IS the accountability vacuum — revenue, labor, equipment, and indemnity are distributed across entities sharing ${cluster.sharedAttributes.length} attributes, so no single entity carries the full operational liability.`,
+            severity: operationalRolesPresent.length >= 3 ? "CRITICAL" : "HIGH",
+          });
+        }
       }
     }
 
