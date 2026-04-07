@@ -219,6 +219,16 @@ export class DocumentToLayer7 {
           buyoutAmount: ft.buyoutAmount,
           defaultInterestRate: ft.defaultInterestRate,
           jurisdictionForumClause: ft.forumClause,
+          // v2 consumer-loan structural fields
+          netProceeds: ft.netProceeds,
+          originationFee: ft.originationFee,
+          disclosedAPR: ft.disclosedAPR,
+          governingLawState: ft.governingLaw ? this.inferStateCode(ft.governingLaw) : undefined,
+          hasConfessionOfJudgment: ft.hasConfessionOfJudgment,
+          hasJuryWaiver: ft.hasJuryWaiver,
+          hasClassActionWaiver: ft.hasClassActionWaiver,
+          hasNoCurePeriod: ft.hasNoCurePeriod,
+          hasOneSidedFeeShifting: ft.hasOneSidedFeeShifting,
         });
       }
     } catch (e) {
@@ -331,22 +341,25 @@ export class DocumentToLayer7 {
       }
     }
 
-    // Case citations — "X v. Y, ... (Court Date)"
-    const caseRe = /([A-Z][A-Za-z]+\s+v\.\s+[A-Z][A-Za-z .,&'\-]+),?\s+\d+\s+[A-Z][A-Za-z. ]+\s+\d+\s*\(([^)]+)\)/g;
+    // Case citations — "X v. Y, NNN F.Xth NNN (Court ... <DATE>)"
+    // Handles reporters like "F.4th", "F.3d", "F.Supp.2d", "U.S.", "S.Ct."
+    const caseRe = /([A-Z][A-Za-z]+\s+v\.\s+[A-Z][A-Za-z .,&'\-]+?),\s+\d+\s+[A-Z][A-Za-z0-9.]+(?:\s+[A-Z][A-Za-z0-9.]+)?\s+\d+\s*\(([^)]+)\)/g;
     while ((m = caseRe.exec(text)) !== null) {
       const date = this.parseEnglishDate(m[2]!);
       if (date) meta.caseCitations.push({ citation: m[1]!.trim(), date });
     }
 
-    // Regulation citations — "29 C.F.R. § XXX as amended effective <DATE>"
-    const regRe = /(\d+\s+C\.F\.R\.\s*(?:Part\s+)?[§\d]+(?:\.\d+)?(?:\([^)]+\))?)[^.]*?(?:as amended\s+)?effective\s+([A-Za-z]+\.?\s+\d{1,2},?\s+\d{4})/gi;
+    // Regulation citations — "29 C.F.R. § 785.19 ... effective <DATE>" or
+    // "29 C.F.R. Part 395 ... effective <DATE>"
+    // Use [\s\S] so we can cross newlines if formatting wraps the citation.
+    const regRe = /(\d+\s*C\.F\.R\.\s*(?:Part\s+\d+|§\s*[\d.]+)(?:\([^)]+\))?)[\s\S]{0,200}?effective\s+([A-Za-z]+\.?\s+\d{1,2},?\s+\d{4})/gi;
     while ((m = regRe.exec(text)) !== null) {
       const date = this.parseEnglishDate(m[2]!);
-      meta.regulationCitations.push({ citation: m[1]!.trim(), effectiveDate: date });
+      meta.regulationCitations.push({ citation: m[1]!.replace(/\s+/g, " ").trim(), effectiveDate: date });
     }
 
-    // Insurance certificate dated requirement
-    const insMatch = text.match(/insurance[^.]*certificate[^.]*?(?:dated|date)[^.]*?([A-Za-z]+\.?\s+\d{1,2},?\s+\d{4})/i);
+    // Insurance certificate dated requirement (case-insensitive, cross-line)
+    const insMatch = text.match(/insurance[\s\S]{0,300}?certificate[\s\S]{0,200}?(?:dated|date)[\s\S]{0,80}?([A-Za-z]+\.?\s+\d{1,2},?\s+\d{4})/i);
     if (insMatch) meta.insuranceCertificateDate = this.parseEnglishDate(insMatch[1]!);
 
     return meta;
@@ -438,18 +451,19 @@ export class DocumentToLayer7 {
 
   private extractFinancialTerms(text: string): ExtractedFinancialTerms {
     const ft: ExtractedFinancialTerms = {};
+    // Use [\s\S] (any char) liberally because contracts wrap across lines.
 
-    const principalMatch = text.match(/principal[^.\n]*?\$\s*([\d,]+(?:\.\d+)?)/i);
+    const principalMatch = text.match(/principal[\s\S]{0,200}?\$\s*([\d,]+(?:\.\d+)?)/i);
     if (principalMatch) ft.principalAmount = this.parseAmount(principalMatch[1]!);
 
-    const origMatch = text.match(/origination[^.\n]*?\$\s*([\d,]+(?:\.\d+)?)/i);
+    const origMatch = text.match(/origination[\s\S]{0,200}?\$\s*([\d,]+(?:\.\d+)?)/i);
     if (origMatch) ft.originationFee = this.parseAmount(origMatch[1]!);
 
-    const netMatch = text.match(/net proceeds[^.\n]*?\$\s*([\d,]+(?:\.\d+)?)/i);
+    const netMatch = text.match(/net proceeds[\s\S]{0,200}?\$\s*([\d,]+(?:\.\d+)?)/i);
     if (netMatch) ft.netProceeds = this.parseAmount(netMatch[1]!);
 
     // "forty (40) consecutive weekly installments of Thirty-Two Dollars ($32.00)"
-    const payMatch = text.match(/(?:in\s+)?(?:[A-Za-z\-]+\s*)?\((\d+)\)\s+(?:consecutive\s+)?(weekly|bi-?weekly|monthly|quarterly|annual)\s+(?:installments?|payments?)\s+of[^.\n]*?\$\s*([\d,]+(?:\.\d+)?)/i);
+    const payMatch = text.match(/\((\d+)\)\s+(?:consecutive\s+)?(weekly|bi-?weekly|monthly|quarterly|annual)\s+(?:installments?|payments?)[\s\S]{0,200}?\$\s*([\d,]+(?:\.\d+)?)/i);
     if (payMatch) {
       ft.paymentCount = parseInt(payMatch[1]!, 10);
       const freq = payMatch[2]!.toLowerCase().replace("-", "");
@@ -457,21 +471,21 @@ export class DocumentToLayer7 {
       ft.paymentAmount = this.parseAmount(payMatch[3]!);
     }
 
-    const totalMatch = text.match(/total of payments[^.\n]*?\$\s*([\d,]+(?:\.\d+)?)/i);
+    const totalMatch = text.match(/total of payments[\s\S]{0,200}?\$\s*([\d,]+(?:\.\d+)?)/i);
     if (totalMatch) ft.totalPayments = this.parseAmount(totalMatch[1]!);
 
-    const aprMatch = text.match(/annual percentage rate[^.\n]*?(\d+(?:\.\d+)?)\s*%/i);
+    const aprMatch = text.match(/annual percentage rate[\s\S]{0,100}?(\d+(?:\.\d+)?)\s*%/i);
     if (aprMatch) ft.disclosedAPR = parseFloat(aprMatch[1]!);
 
     const lateMatch = text.match(/late fee of\s*\$\s*([\d,]+(?:\.\d+)?)/i);
     if (lateMatch) ft.lateFee = this.parseAmount(lateMatch[1]!);
 
-    // Borrower jurisdiction (state code from borrower address)
-    const borrowerMatch = text.match(/borrower:[^]*?,\s*([A-Z]{2})\s+\d{5}/i);
+    // Borrower jurisdiction (state code from borrower address — cross-line)
+    const borrowerMatch = text.match(/borrower:[\s\S]{0,400}?,\s*([A-Z]{2})\s+\d{5}/i);
     if (borrowerMatch) ft.jurisdiction = borrowerMatch[1];
 
-    // Forum / governing law
-    const forumMatch = text.match(/(?:arbitration|venue|forum)[^.\n]*?\bin\s+([A-Za-z .]+,\s*(?:[A-Za-z ]+|[A-Z]{2}))(?=[\s,.])/i);
+    // Forum clause — "arbitration in <City>, <State>" with cross-line tolerance
+    const forumMatch = text.match(/(?:arbitration|venue|forum|filed)[\s\S]{0,200}?\bin\s+([A-Z][A-Za-z .'\-]+,\s*[A-Z][A-Za-z ]+)/);
     if (forumMatch) ft.forumClause = forumMatch[1]!.trim();
 
     const lawMatch = text.match(/governed by the laws of(?:\s+the\s+state\s+of)?\s+([A-Za-z ]+)/i);
@@ -543,16 +557,30 @@ export class DocumentToLayer7 {
           });
         }
       }
-      // Insurance certificate temporal claim
-      if (meta.insuranceCertificateDate && entities.some((e) => e.formationDate && e.formationDate > meta.insuranceCertificateDate!)) {
-        const lateEntity = entities.find((e) => e.formationDate && e.formationDate > meta.insuranceCertificateDate!)!;
-        out.push({
-          flag: "INSURANCE_CERTIFICATE_TEMPORAL_CLAIM",
-          source: "extractor",
-          severity: "HIGH",
-          finding: `Document requires insurance certificate dated by ${meta.insuranceCertificateDate}, but the entity required to provide it (${lateEntity.name}) did not exist until ${lateEntity.formationDate}. No valid certificate could have existed on the required date.`,
-          evidence: `Required certificate date: ${meta.insuranceCertificateDate}; Entity ${lateEntity.name} formed: ${lateEntity.formationDate}`,
-        });
+      // Insurance certificate temporal claim — check both inline-extracted
+      // entity formation dates (meta.entityFormationDates) AND block-extracted
+      // entities (entities[]). The 7a fixture uses inline narrative format.
+      if (meta.insuranceCertificateDate) {
+        const requiredDate = meta.insuranceCertificateDate;
+        const lateInline = meta.entityFormationDates.find((ef) => ef.date > requiredDate);
+        const lateBlock = entities.find((e) => e.formationDate && e.formationDate > requiredDate);
+        if (lateInline) {
+          out.push({
+            flag: "INSURANCE_CERTIFICATE_TEMPORAL_CLAIM",
+            source: "extractor",
+            severity: "HIGH",
+            finding: `Document requires insurance certificate dated by ${requiredDate}, but the entity required to provide it (${lateInline.entity}) did not exist until ${lateInline.date}. No valid certificate could have existed on the required date.`,
+            evidence: `Required certificate date: ${requiredDate}; Entity ${lateInline.entity} formed: ${lateInline.date}`,
+          });
+        } else if (lateBlock) {
+          out.push({
+            flag: "INSURANCE_CERTIFICATE_TEMPORAL_CLAIM",
+            source: "extractor",
+            severity: "HIGH",
+            finding: `Document requires insurance certificate dated by ${requiredDate}, but the entity required to provide it (${lateBlock.name}) did not exist until ${lateBlock.formationDate}. No valid certificate could have existed on the required date.`,
+            evidence: `Required certificate date: ${requiredDate}; Entity ${lateBlock.name} formed: ${lateBlock.formationDate}`,
+          });
+        }
       }
     }
 

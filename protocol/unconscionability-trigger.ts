@@ -50,6 +50,20 @@ export interface FinancialTerms {
   warranty?: "none" | "limited" | "full" | "as_is";
   maintenanceObligation?: "lessor" | "lessee" | "shared";
   insuranceObligation?: "lessor" | "lessee" | "shared";
+
+  // Consumer-loan structural fields (added v2 — supports 7d engine
+  // detection of TILA/Reg Z, FTC Credit Practices Rule, choice of law,
+  // and procedural unconscionability flags. All optional for backward
+  // compatibility with existing lease-only callers.)
+  netProceeds?: number;             // Amount actually advanced after fees
+  originationFee?: number;          // Pre-funding fee
+  disclosedAPR?: number;            // What the contract claims
+  governingLawState?: string;       // Two-letter state code from choice-of-law clause
+  hasConfessionOfJudgment?: boolean;
+  hasJuryWaiver?: boolean;
+  hasClassActionWaiver?: boolean;
+  hasNoCurePeriod?: boolean;
+  hasOneSidedFeeShifting?: boolean;
 }
 
 export type UnconscionabilityFlag =
@@ -58,10 +72,18 @@ export type UnconscionabilityFlag =
   | "ZERO_EQUITY_FORFEITURE"
   | "USURY_VIOLATION"
   | "JURISDICTIONAL_OPPRESSION"
+  | "FORUM_SELECTION_OPPRESSION"
   | "RISK_TRANSFER_TOTAL"
   | "REPOSSESSION_WITHOUT_PROCESS"
   | "RESIDUAL_VALUE_GAP"
-  | "MATH_NULL_OWNERSHIP";
+  | "MATH_NULL_OWNERSHIP"
+  | "FRAUDULENT_APR_DISCLOSURE"
+  | "ORIGINATION_FEE_FINANCE_CHARGE_MISCLASSIFICATION"
+  | "CONFESSION_OF_JUDGMENT"
+  | "CHOICE_OF_LAW_EVASION"
+  | "ONE_SIDED_FEE_SHIFTING"
+  | "CLASS_ACTION_AND_JURY_WAIVER"
+  | "NO_CURE_PERIOD";
 
 export interface UnconscionabilityFinding {
   flag: UnconscionabilityFlag;
@@ -284,6 +306,105 @@ export class UnconscionabilityTrigger {
         evidence: `FMV estimate: $${fmv.toFixed(2)}, Buyout: $${buyout}, Gap: ${residualGapPercent.toFixed(1)}%`,
         legalImplication: "When the buyout is significantly below the asset's market value, the transaction is more accurately characterized as a financed sale than a true lease.",
         citation: "UCC §1-203(b)(4)",
+      });
+    }
+
+    // ─── Consumer-loan structural tests (v2) ─────────────────────────
+
+    // Test 9: Fraudulent APR disclosure (TILA / Reg Z)
+    // If the disclosed APR is materially understated relative to the
+    // effective APR computed on net proceeds, the disclosure is fraudulent
+    // under the Truth in Lending Act regardless of whether the math is
+    // technically defensible under the lender's interpretation.
+    if (terms.disclosedAPR !== undefined && (terms.netProceeds ?? 0) > 0) {
+      const netProceeds = terms.netProceeds!;
+      const interestOnNet = Math.max(0, totalCost - netProceeds);
+      const effectiveOnNet = years > 0 ? (interestOnNet / netProceeds / years) * 100 : 0;
+      if (effectiveOnNet > terms.disclosedAPR * 1.5) {
+        findings.push({
+          flag: "FRAUDULENT_APR_DISCLOSURE",
+          severity: "CRITICAL",
+          finding: `Disclosed APR is ${terms.disclosedAPR}%, but effective APR on net proceeds is approximately ${effectiveOnNet.toFixed(0)}% — disclosure understates true cost by a factor of ${(effectiveOnNet / terms.disclosedAPR).toFixed(1)}x.`,
+          evidence: `Net proceeds $${netProceeds.toFixed(2)}, total payments $${totalCost.toFixed(2)}, term ${years.toFixed(2)} years, effective simple APR ${effectiveOnNet.toFixed(1)}%`,
+          legalImplication: "TILA (15 U.S.C. §1601 et seq.) and Regulation Z (12 C.F.R. Part 1026) require lenders to disclose the APR in a manner that reflects the true cost of credit. Materially understating the APR by excluding fees from the finance charge is a violation that triggers civil penalties (15 U.S.C. §1640), the right of rescission for secured loans (15 U.S.C. §1635), and (in some states) automatic forfeiture of all interest.",
+          citation: "15 U.S.C. §1601 et seq. (TILA); 12 C.F.R. §1026.4 (finance charge); Mourning v. Family Publications Service, 411 U.S. 356 (1973)",
+        });
+      }
+    }
+
+    // Test 10: Origination fee misclassification
+    if ((terms.originationFee ?? 0) > 0 && terms.disclosedAPR !== undefined) {
+      findings.push({
+        flag: "ORIGINATION_FEE_FINANCE_CHARGE_MISCLASSIFICATION",
+        severity: "HIGH",
+        finding: `Origination fee of $${terms.originationFee!.toFixed(2)} is reported alongside a disclosed APR of ${terms.disclosedAPR}%. Under 12 C.F.R. §1026.4 the fee must be included in the finance charge for APR computation; excluding it produces a misleading rate.`,
+        evidence: `Origination fee: $${terms.originationFee}; Disclosed APR: ${terms.disclosedAPR}%`,
+        legalImplication: "Regulation Z §1026.4(a) defines the finance charge to include 'any charge payable directly or indirectly by the consumer and imposed directly or indirectly by the creditor as an incident to or a condition of the extension of credit.' Origination fees fall squarely within this definition. Excluding them violates TILA and triggers the same remedies.",
+        citation: "12 C.F.R. §1026.4(a); 12 C.F.R. §1026.4(b)(3)",
+      });
+    }
+
+    // Test 11: Confession of judgment (per se unenforceable against consumers)
+    if (terms.hasConfessionOfJudgment) {
+      findings.push({
+        flag: "CONFESSION_OF_JUDGMENT",
+        severity: "CRITICAL",
+        finding: "Contract contains a confession-of-judgment clause, which is per se unenforceable against consumers under the FTC Credit Practices Rule.",
+        evidence: "Confession-of-judgment clause present",
+        legalImplication: "16 C.F.R. §444.2(a)(4) prohibits creditors from including in any consumer credit obligation a cognovit or confession of judgment under which the consumer authorizes a creditor to obtain a judgment without notice or a hearing. Inclusion of such a clause is itself an unfair act or practice under §5 of the FTC Act, regardless of whether the clause is ever invoked.",
+        citation: "16 C.F.R. §444.2(a)(4); FTC Credit Practices Rule",
+      });
+    }
+
+    // Test 12: Choice of law evasion
+    if (
+      terms.governingLawState &&
+      terms.jurisdiction &&
+      terms.governingLawState.toUpperCase() !== terms.jurisdiction.toUpperCase()
+    ) {
+      findings.push({
+        flag: "CHOICE_OF_LAW_EVASION",
+        severity: "HIGH",
+        finding: `Contract selects ${terms.governingLawState} law for a borrower in ${terms.jurisdiction}, evading the borrower's home-state consumer protections.`,
+        evidence: `Governing law: ${terms.governingLawState}; Borrower jurisdiction: ${terms.jurisdiction}`,
+        legalImplication: "Under Restatement (Second) of Conflict of Laws §187 and the Nedlloyd Lines analysis adopted by California (Nedlloyd Lines, Inc. v. Superior Court, 3 Cal. 4th 459 (1992)), choice-of-law clauses are unenforceable where (a) the chosen state has no substantial relationship to the parties or the transaction, or (b) application of the chosen state's law would be contrary to a fundamental policy of the state with the materially greater interest. California consumer-protection statutes (Rosenthal Act, Unruh Act, UCL §17200) are typically held to constitute fundamental policy.",
+        citation: "Restatement (Second) of Conflict of Laws §187; Nedlloyd Lines, Inc. v. Superior Court, 3 Cal. 4th 459 (1992); Cal. Civ. Code §1646.5",
+      });
+    }
+
+    // Test 13: One-sided fee shifting
+    if (terms.hasOneSidedFeeShifting) {
+      findings.push({
+        flag: "ONE_SIDED_FEE_SHIFTING",
+        severity: "HIGH",
+        finding: "Contract requires the borrower to pay the lender's attorneys' fees regardless of outcome, with no reciprocal obligation on the lender.",
+        evidence: "One-sided fee-shifting clause present",
+        legalImplication: "California Civil Code §1717 makes any unilateral attorneys'-fees clause in a contract reciprocal as a matter of law in any action on the contract — the lender cannot benefit from a one-way clause. The clause is also a substantive unconscionability factor under Cal. Civ. Code §1670.5 and Armendariz v. Foundation Health Psychcare, 24 Cal. 4th 83 (2000).",
+        citation: "Cal. Civ. Code §1717; Cal. Civ. Code §1670.5; Armendariz v. Foundation Health Psychcare, 24 Cal. 4th 83 (2000)",
+      });
+    }
+
+    // Test 14: Class action and/or jury waiver
+    if (terms.hasClassActionWaiver || terms.hasJuryWaiver) {
+      findings.push({
+        flag: "CLASS_ACTION_AND_JURY_WAIVER",
+        severity: "MEDIUM",
+        finding: `Contract contains ${terms.hasClassActionWaiver ? "class action waiver" : ""}${terms.hasClassActionWaiver && terms.hasJuryWaiver ? " and " : ""}${terms.hasJuryWaiver ? "jury trial waiver" : ""}.`,
+        evidence: `Class waiver: ${!!terms.hasClassActionWaiver}; Jury waiver: ${!!terms.hasJuryWaiver}`,
+        legalImplication: "While class action and jury waivers are not per se unenforceable post-Concepcion, their combination with other procedurally-unconscionable terms (forum selection, arbitration in a distant forum, fee shifting) is a recognized factor in the totality-of-circumstances analysis. Under California's Discover Bank rule (modified post-Concepcion) class action waivers in consumer contracts of adhesion remain a substantive-unconscionability factor.",
+        citation: "AT&T Mobility v. Concepcion, 563 U.S. 333 (2011); Sanchez v. Valencia Holding Co., 61 Cal. 4th 899 (2015)",
+      });
+    }
+
+    // Test 15: No cure period
+    if (terms.hasNoCurePeriod) {
+      findings.push({
+        flag: "NO_CURE_PERIOD",
+        severity: "MEDIUM",
+        finding: "Contract eliminates any right to cure default before acceleration or enforcement.",
+        evidence: "Explicit no-cure clause present",
+        legalImplication: "The absence of a cure period in a consumer credit contract compounds the harshness of acceleration clauses and is a recognized substantive-unconscionability factor under Cal. Civ. Code §1670.5. Many state consumer protection statutes mandate a minimum cure period regardless of contract language.",
+        citation: "Cal. Civ. Code §1670.5; state consumer credit protection statutes",
       });
     }
 

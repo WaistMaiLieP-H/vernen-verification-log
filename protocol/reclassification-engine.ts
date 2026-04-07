@@ -357,8 +357,15 @@ export class ReclassificationEngine {
     }
 
     // ─── Determine verdict ───────────────────────────────────────────
+    // Failing ALL THREE jurisdictional tests is structurally dispositive:
+    // when AB5 ABC, IRS-20, and DOL economic-reality all fail, the
+    // relationship cannot survive any framework — that's de facto
+    // employment as a matter of law regardless of the raw control score.
+    const applicableFailedAll =
+      testResults.filter((t) => t.applies).length >= 3 &&
+      testResults.filter((t) => t.applies && !t.passes).length === testResults.filter((t) => t.applies).length;
     let verdict: ReclassificationReport["reclassificationVerdict"];
-    if (cumulativeScore >= 60 && failedTestsCount >= 2) {
+    if (applicableFailedAll || (cumulativeScore >= 60 && failedTestsCount >= 2)) {
       verdict = "DE_FACTO_EMPLOYEE_AS_MATTER_OF_LAW";
     } else if (cumulativeScore >= 40 || failedTestsCount >= 2) {
       verdict = "PRESUMED_EMPLOYEE";
