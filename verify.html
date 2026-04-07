@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vernen Verification Log — Browser Verifier</title>
+<style>
+  :root {
+    --bg: #0b0e14;
+    --fg: #e6edf3;
+    --muted: #8b949e;
+    --border: #30363d;
+    --ok: #3fb950;
+    --bad: #f85149;
+    --accent: #58a6ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    margin: 0;
+    padding: 2rem 1rem;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  h1 { margin-top: 0; font-weight: 600; }
+  p.lede { color: var(--muted); }
+  label {
+    display: block;
+    margin-top: 1rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  input, textarea {
+    width: 100%;
+    background: #161b22;
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.5rem 0.75rem;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 0.85rem;
+    margin-top: 0.25rem;
+  }
+  textarea { min-height: 110px; resize: vertical; }
+  button {
+    margin-top: 1.5rem;
+    background: var(--accent);
+    color: #0b0e14;
+    border: none;
+    padding: 0.7rem 1.2rem;
+    font-weight: 600;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 1rem;
+  }
+  button:hover { filter: brightness(1.1); }
+  #result {
+    margin-top: 1.5rem;
+    padding: 1rem;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: #161b22;
+    display: none;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 0.85rem;
+    word-break: break-all;
+  }
+  #result.ok { border-color: var(--ok); }
+  #result.bad { border-color: var(--bad); }
+  .badge {
+    display: inline-block;
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    font-weight: 700;
+    font-size: 0.85rem;
+    margin-bottom: 0.6rem;
+  }
+  .badge.ok { background: var(--ok); color: #0b0e14; }
+  .badge.bad { background: var(--bad); color: #0b0e14; }
+  small { color: var(--muted); }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Vernen Verification Log</h1>
+  <p class="lede">
+    Browser-based verifier. This page runs entirely in your browser. No
+    network calls. No trust in Vernen required. Recomputes the Merkle
+    root from the proof path you provide and compares it to the expected
+    root from this repo.
+  </p>
+
+  <label for="recordId">Record ID</label>
+  <input id="recordId" placeholder="e.g. exec_abc123">
+
+  <label for="leafHash">Leaf hash <small>(SHA-256 hex of the record's combined_hash)</small></label>
+  <input id="leafHash" placeholder="64 hex chars">
+
+  <label for="leafIndex">Leaf index</label>
+  <input id="leafIndex" type="number" min="0" placeholder="0">
+
+  <label for="proofPath">Proof path <small>(JSON array of sibling hashes)</small></label>
+  <textarea id="proofPath" placeholder='["abc...","def..."]'></textarea>
+
+  <label for="expectedRoot">Expected Merkle root <small>(from the daily JSON file in this repo)</small></label>
+  <input id="expectedRoot" placeholder="64 hex chars">
+
+  <button id="go">Verify</button>
+
+  <div id="result"></div>
+
+  <p style="margin-top:2rem; font-size:0.85rem; color:var(--muted);">
+    Algorithm: standard binary Merkle tree, SHA-256, last leaf duplicated
+    when a level has odd length, leaf index determines left/right pairing
+    at each level. See
+    <a href="https://github.com/WaistMaiLieP-H/VERNEN/blob/master/docs/VERIFIABILITY_ARCHITECTURE.md">spec</a>.
+  </p>
+</div>
+
+<script>
+async function sha256Hex(input) {
+  const data = new TextEncoder().encode(input);
+  const buf = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(buf))
+    .map(b => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function verifyMerkleProof(leafHash, proofPath, leafIndex, expectedRoot) {
+  let current = leafHash.toLowerCase();
+  let index = leafIndex;
+  for (const sibling of proofPath) {
+    const left = index % 2 === 0 ? current : sibling.toLowerCase();
+    const right = index % 2 === 0 ? sibling.toLowerCase() : current;
+    current = await sha256Hex(left + right);
+    index = Math.floor(index / 2);
+  }
+  return { computedRoot: current, ok: current === expectedRoot.toLowerCase() };
+}
+
+document.getElementById("go").addEventListener("click", async () => {
+  const out = document.getElementById("result");
+  out.style.display = "block";
+  out.className = "";
+  out.textContent = "Computing...";
+
+  try {
+    const recordId = document.getElementById("recordId").value.trim();
+    const leafHash = document.getElementById("leafHash").value.trim();
+    const leafIndex = parseInt(document.getElementById("leafIndex").value, 10);
+    const proofPathRaw = document.getElementById("proofPath").value.trim();
+    const expectedRoot = document.getElementById("expectedRoot").value.trim();
+
+    if (!leafHash || !/^[0-9a-fA-F]{64}$/.test(leafHash))
+      throw new Error("leaf hash must be 64 hex chars");
+    if (!expectedRoot || !/^[0-9a-fA-F]{64}$/.test(expectedRoot))
+      throw new Error("expected root must be 64 hex chars");
+    if (Number.isNaN(leafIndex) || leafIndex < 0)
+      throw new Error("leaf index must be a non-negative integer");
+
+    const proofPath = JSON.parse(proofPathRaw);
+    if (!Array.isArray(proofPath))
+      throw new Error("proof path must be a JSON array");
+
+    const { computedRoot, ok } = await verifyMerkleProof(
+      leafHash, proofPath, leafIndex, expectedRoot
+    );
+
+    out.className = ok ? "ok" : "bad";
+    out.innerHTML =
+      '<div class="badge ' + (ok ? "ok" : "bad") + '">' +
+      (ok ? "VERIFIED" : "TAMPERED") + '</div>' +
+      "<div><strong>Record:</strong> " + (recordId || "(none)") + "</div>" +
+      "<div><strong>Computed root:</strong> " + computedRoot + "</div>" +
+      "<div><strong>Expected root:</strong> " + expectedRoot.toLowerCase() + "</div>" +
+      "<div style='margin-top:0.6rem;'>" +
+      (ok
+        ? "The proof recomputes to the expected root. The record is included in this day's Merkle tree."
+        : "The recomputed root does NOT match the expected root. Either the record, the proof, or the root has been altered.")
+      + "</div>";
+  } catch (err) {
+    out.className = "bad";
+    out.innerHTML =
+      '<div class="badge bad">ERROR</div><div>' +
+      (err && err.message ? err.message : String(err)) + "</div>";
+  }
+});
+</script>
+</body>
+</html>
