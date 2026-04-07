@@ -1,0 +1,9 @@
+{
+  "project": "Vernen Verification Log",
+  "version": "1.0.0",
+  "genesis_seed": "VERNEN_GENESIS_2026",
+  "genesis_hash": "1662b214b39d68462c60e10dedd67634b85c8db250eabf41c252e968cb05b149",
+  "spec_url": "https://github.com/WaistMaiLieP-H/VERNEN/blob/master/docs/VERIFIABILITY_ARCHITECTURE.md",
+  "created": "2026-04-07",
+  "license": "CC0-1.0"
+}
