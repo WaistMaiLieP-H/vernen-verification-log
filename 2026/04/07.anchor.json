@@ -1,0 +1,9 @@
+{
+  "anchored_at_root": "2026-04-07",
+  "merkle_root": "77b6504fefa9a0972979ce8055ea97c9eff1774d18f24ad4de166d7db7362af4",
+  "tx_hash": "0x3eb7665ae500b3dfbd7e204fcfd745fffac3063c171cc062bbac70239bba4de2",
+  "chain": "base-mainnet",
+  "chain_id": 8453,
+  "from": "0x8c514af69ffdd2221946cD5E0e712d82cBf17E11",
+  "basescan_url": "https://basescan.org/tx/0x3eb7665ae500b3dfbd7e204fcfd745fffac3063c171cc062bbac70239bba4de2"
+}

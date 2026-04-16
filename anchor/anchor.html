@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Vernen Verification — Base Anchor</title>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 20px; color: #222; }
+  h1 { font-size: 1.4rem; margin-bottom: 0.2rem; }
+  .sub { color: #666; margin-bottom: 2rem; }
+  .card { border: 1px solid #ddd; border-radius: 8px; padding: 20px; margin-bottom: 16px; background: #fafafa; }
+  .label { font-size: 0.8rem; color: #888; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+  .val { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem; word-break: break-all; }
+  button { background: #0b57d0; color: white; border: 0; padding: 12px 24px; font-size: 1rem; border-radius: 6px; cursor: pointer; }
+  button:disabled { background: #999; cursor: not-allowed; }
+  button:hover:not(:disabled) { background: #0842a0; }
+  .err { color: #c00; padding: 12px; background: #fee; border-radius: 6px; margin-top: 12px; }
+  .ok { color: #060; padding: 12px; background: #efe; border-radius: 6px; margin-top: 12px; }
+  a { color: #0b57d0; }
+  textarea { width: 100%; height: 80px; font-family: ui-monospace, monospace; font-size: 0.85rem; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+  input[type=text] { width: 100%; font-family: ui-monospace, monospace; font-size: 0.85rem; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+</style>
+</head>
+<body>
+
+<h1>Vernen Verification Log — Base L2 Anchor</h1>
+<p class="sub">Posts a daily Merkle root to Base as a self-send transaction. The key never leaves MetaMask.</p>
+
+<div class="card">
+  <div class="label">Daily Merkle Root (paste from latest <code>YYYY/MM/DD.json</code>)</div>
+  <textarea id="root" placeholder="77b6504fefa9a0972979ce8055ea97c9eff1774d18f24ad4de166d7db7362af4"></textarea>
+  <div class="label" style="margin-top: 12px;">Date label (e.g. 2026-04-07) — optional, just for the receipt</div>
+  <input type="text" id="date" placeholder="2026-04-07">
+</div>
+
+<div class="card">
+  <div class="label">Wallet</div>
+  <div class="val" id="wallet">— not connected —</div>
+  <div class="label" style="margin-top: 12px;">Network</div>
+  <div class="val" id="network">—</div>
+</div>
+
+<button id="connect">Connect MetaMask</button>
+<button id="anchor" disabled>Sign &amp; Broadcast Anchor</button>
+
+<div id="status"></div>
+
+<script>
+const BASE_CHAIN_ID_HEX = "0x2105"; // 8453
+const BASE_PARAMS = {
+  chainId: BASE_CHAIN_ID_HEX,
+  chainName: "Base",
+  nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+  rpcUrls: ["https://mainnet.base.org", "https://base.publicnode.com"],
+  blockExplorerUrls: ["https://basescan.org"],
+};
+
+let account = null;
+
+function show(html, kind = "ok") {
+  document.getElementById("status").innerHTML = `<div class="${kind}">${html}</div>`;
+}
+
+function isHex64(s) {
+  s = s.trim().replace(/^0x/i, "");
+  return /^[0-9a-fA-F]{64}$/.test(s);
+}
+
+async function ensureBase() {
+  const current = await ethereum.request({ method: "eth_chainId" });
+  if (current === BASE_CHAIN_ID_HEX) return;
+  try {
+    await ethereum.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: BASE_CHAIN_ID_HEX }],
+    });
+  } catch (e) {
+    if (e.code === 4902) {
+      await ethereum.request({ method: "wallet_addEthereumChain", params: [BASE_PARAMS] });
+    } else {
+      throw e;
+    }
+  }
+}
+
+document.getElementById("connect").onclick = async () => {
+  if (!window.ethereum) {
+    show("MetaMask not detected. Install the extension and reload this page.", "err");
+    return;
+  }
+  try {
+    const accounts = await ethereum.request({ method: "eth_requestAccounts" });
+    account = accounts[0];
+    document.getElementById("wallet").textContent = account;
+    await ensureBase();
+    document.getElementById("network").textContent = "Base (chainId 8453)";
+    document.getElementById("anchor").disabled = false;
+    show("Connected. Paste the Merkle root above and click Sign & Broadcast.");
+  } catch (e) {
+    show("Connect failed: " + (e.message || e), "err");
+  }
+};
+
+document.getElementById("anchor").onclick = async () => {
+  const raw = document.getElementById("root").value.trim();
+  if (!isHex64(raw)) {
+    show("Merkle root must be exactly 64 hex characters (with or without 0x).", "err");
+    return;
+  }
+  const root = raw.replace(/^0x/i, "").toLowerCase();
+  await ensureBase();
+  const tx = {
+    from: account,
+    to: account,
+    value: "0x0",
+    data: "0x" + root,
+  };
+  show("Approve the transaction in the MetaMask popup...");
+  try {
+    const hash = await ethereum.request({ method: "eth_sendTransaction", params: [tx] });
+    const url = "https://basescan.org/tx/" + hash;
+    const date = document.getElementById("date").value.trim();
+    show(`
+      Anchor broadcast.<br>
+      <strong>Tx hash:</strong> <span class="val">${hash}</span><br>
+      <strong>View on Basescan:</strong> <a href="${url}" target="_blank" rel="noopener">${url}</a><br>
+      ${date ? `<strong>Anchored root for date:</strong> ${date}<br>` : ""}
+      <em>Wait ~2s for confirmation, then refresh basescan.</em>
+    `);
+  } catch (e) {
+    show("Broadcast failed or rejected: " + (e.message || e), "err");
+  }
+};
+</script>
+
+</body>
+</html>
