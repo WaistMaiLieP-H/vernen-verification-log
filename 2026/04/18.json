@@ -4,7 +4,7 @@
   "record_count": 37,
   "first_seq": 8113,
   "last_seq": 8149,
-  "computed_at": "2026-04-18T21:17:20.113Z",
+  "computed_at": "2026-04-18T21:17:43.045Z",
   "previous_root": "c0fc3ced6a1136ae3e99c04d03f42349336e3e37295e2539d268271b0f2b3f3d",
   "verification_url": "https://compliance.vernenlegal.com/api/verify/merkle/2026-04-18",
   "build_attestation": {
