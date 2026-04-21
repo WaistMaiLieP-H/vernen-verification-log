@@ -1,0 +1,34 @@
+{
+  "date": "2026-04-20",
+  "merkle_root": "b7d50c63700036c0e40212bc2d9da1ec6f49fc2f8ff22f460e067ae34e2b373d",
+  "record_count": 3,
+  "first_seq": 8406,
+  "last_seq": 8408,
+  "computed_at": "2026-04-21T01:00:45.775Z",
+  "previous_root": "41ea67d7b5df555f015b2178dc8567b1231e63dc6a2c31e1a4733b5c92c8efa3",
+  "verification_url": "https://compliance.vernenlegal.com/api/verify/merkle/2026-04-20",
+  "build_attestation": {
+    "source_commit": "e45ea6b547c06adcc77d104612e10de6b6991a4a",
+    "built_at": "2026-04-07T07:30:00Z",
+    "protocol_versions": {
+      "layer_1_hash_chain": "1.0.0",
+      "layer_2_merkle_tree": "1.0.0",
+      "layer_3_github_anchor": "1.0.0",
+      "layer_5_constitutional": "1.0.0",
+      "layer_5a_zk_primitives": "1.0.0",
+      "layer_5c_consensus": "1.0.0"
+    },
+    "public_source": {
+      "engine": "https://raw.githubusercontent.com/WaistMaiLieP-H/vernen-verification-log/main/protocol/verification-engine.ts",
+      "anchor": "https://raw.githubusercontent.com/WaistMaiLieP-H/vernen-verification-log/main/protocol/verification-anchor.ts",
+      "consensus": "https://raw.githubusercontent.com/WaistMaiLieP-H/vernen-verification-log/main/protocol/consensus-engine.ts",
+      "zk": "https://raw.githubusercontent.com/WaistMaiLieP-H/vernen-verification-log/main/protocol/zk-primitives.ts",
+      "spec": "https://raw.githubusercontent.com/WaistMaiLieP-H/vernen-verification-log/main/protocol/SPEC.md"
+    },
+    "verification_instructions": "To verify the deployed code matches published source: fetch each public_source URL, run sha256sum, and compare. Any divergence between deployed and published source is a tampering signal."
+  },
+  "external_anchors": {
+    "wayback_machine": "https://web.archive.org/web/2*/compliance.vernenlegal.com/api/verify/merkle/2026-04-20",
+    "github_raw": "https://raw.githubusercontent.com/WaistMaiLieP-H/vernen-verification-log/main/2026/04/20.json"
+  }
+}
